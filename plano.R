@@ -7,51 +7,30 @@ library(dplyr)
 
 cases <- read_excel("GLP/BR_VigiLyze.xlsx", sheet = "Cases")
 drugs <- read_excel("GLP/BR_VigiLyze.xlsx", sheet = "Drugs")
+reactions <-  read_excel("GLP/BR_VigiLyze.xlsx", sheet = "Reactions")
 
-#separar medicamentos por campos
-library(tidyr)
-#v <- setNames(rep(NA, 21), paste0("d", 1:21))
-#v <- names(v)
-#cases2 <- cases |> 
-#separate(col=`WHODrug active ingredient variant`, 
-#         into = v,
-#         sep = "\r\n")
-#frequencia por campo
-#t1 <- as.data.frame(table(cases2$d1))
-#t10 <- as.data.frame(table(cases2$d1))
-#t21 <- as.data.frame(table(cases2$d21))
+#Clean column names
+cases <- clean_names(cases)
+drugs <- clean_names(drugs)
+reactions <- clean_names(reactions)
 
-library(dplyr)
-library (stringr)
-cases2 <- cases |> 
-  mutate(
-    Semaglutide = case_when(
-  str_detect(`WHODrug active ingredient variant`, "Semaglutide") == TRUE ~ 1
-  ),
-  Dulaglutide = case_when(
-    str_detect(`WHODrug active ingredient variant`, "Dulaglutide") == TRUE ~ 1
-  ),
-  Liraglutide = case_when(
-    str_detect(`WHODrug active ingredient variant`, "Liraglutide") == TRUE ~ 1
-  ),
-  Lixisenatide = case_when(
-    str_detect(`WHODrug active ingredient variant`, "Lixisenatide") == TRUE ~ 1
-  ),
-  Tirzepatide = case_when(
-    str_detect(`WHODrug active ingredient variant`, "Tirzepatide") == TRUE ~ 1
-  ),
-  Insulin = case_when(
-    str_detect(`WHODrug active ingredient variant`, "Insulin degludec;Liraglutide") == TRUE ~ 1
-  )
-  )  
-  
 #selecionar casos de interesse
-
+drugs2 <- drugs |>
+  filter(who_drug_active_ingredient_variant %in%
+           c("Semaglutide",
+             "Dulaglutide",
+             "Liraglutide",
+             "Lixisenatide",
+             "Tirzepatide",
+             "Insulin degludec;Liraglutide"
+           ) )|>
+  #filter (Role %in% "Suspect") |>
+  distinct()
 
 #pares unicos medicamento e ID
 #tabela pro join de características
 unicos <- drugs2 |> 
-  select(`UMC report ID`, `WHODrug active ingredient variant`) |> 
+  select(umc_report_id, who_drug_active_ingredient_variant) |> 
   distinct()
 
 #casos com mais de um medicamento reportado
@@ -68,18 +47,9 @@ unicosm <- unicos |>
   count() |> 
   filter (n>1)
              
-which (drugs2$`UMC report ID`=="47909629")
-
-cases[cases$`UMC report ID`=="47909629",]
-  
-# join n= 2627
-
+#juntar dados demográficos
 unicos <- unicos |> 
-  left_join(cases, by = (`UMC report ID`), keep = F) 
-
-#clean names no unicos
-unicos <- clean_names(unicos)
-
+  left_join(cases, by ="umc_report_id", keep = F) 
 
 # Tabela 1 ----------------------------------------------------------------
 
@@ -122,7 +92,24 @@ names(t2)[1] <- "who_drug_active_ingredient_variant_x"
 t1 <- rbind(t1,t2)
 rm(t2)
 
-
 # Curva epidemica ---------------------------------------------------------
+library (lubridate)
 
+#drugs2$teste <- as.Date(drugs2$start_date, format = c("%Y-%m-%d"))
+
+library(dplyr)
+library(stringr)
+library(lubridate)
+
+#padronizar campos de dados para pegar o ano pelo menos
+drugs2 <- drugs2 |> 
+  mutate(
+    data_padronizada = case_when(
+      str_detect(start_date, "^\\d{4}$") ~ paste0(start_date, "-01-01"),
+      str_detect(start_date, "^\\d{4}-\\d{2}$") ~ paste0(start_date, "-01"),
+      TRUE ~ start_date
+    ),
+    data_final = ymd(data_padronizada),
+    ano = year(data_final)
+  )
 
