@@ -21,9 +21,9 @@ drugs2 <- drugs |>
              "Dulaglutide",
              "Liraglutide",
              "Lixisenatide",
-             "Tirzepatide",
-             "Insulin degludec;Liraglutide"
-           ) )|>
+             "Tirzepatide"
+             #"Insulin degludec;Liraglutide")
+           ))|>
   #filter (Role %in% "Suspect") |>
   distinct()
 
@@ -62,7 +62,7 @@ sum(!is.na(unicos$height_cm))
 
 # idade, sexo, IMC por medicamento
 t1 <- unicos |> 
-  group_by(who_drug_active_ingredient_variant_x) |> 
+  group_by(who_drug_active_ingredient_variant.x) |> 
   summarise(
     med_age = median(age, na.rm = TRUE),
     n_age = sum(!is.na(age)),
@@ -87,7 +87,7 @@ t2 <- unicos |>
   )
 
 t2 <- cbind("Total", t2)
-names(t2)[1] <- "who_drug_active_ingredient_variant_x"
+names(t2)[1] <- "who_drug_active_ingredient_variant.x"
 
 t1 <- rbind(t1,t2)
 rm(t2)
@@ -102,14 +102,83 @@ library(stringr)
 library(lubridate)
 
 #padronizar campos de dados para pegar o ano pelo menos
-drugs2 <- drugs2 |> 
+unicos <- unicos |> 
   mutate(
-    data_padronizada = case_when(
-      str_detect(start_date, "^\\d{4}$") ~ paste0(start_date, "-01-01"),
-      str_detect(start_date, "^\\d{4}-\\d{2}$") ~ paste0(start_date, "-01"),
-      TRUE ~ start_date
-    ),
-    data_final = ymd(data_padronizada),
-    ano = year(data_final)
+    data_pad = ymd(vigi_base_initial_date),
+    month_yr = format_ISO8601(data_pad, precision = "ym")
   )
 
+
+freq_mes <- unicos |> 
+  group_by(month_yr, who_drug_active_ingredient_variant.x) |> 
+  summarise( total =n())
+
+library (ggplot2)
+library(RColorBrewer)
+freq_mes |> 
+ggplot() +
+  #geom_line(size = 0.3)+
+  geom_line(aes(x= ym(month_yr),y=total,
+            group = who_drug_active_ingredient_variant.x,
+            color = who_drug_active_ingredient_variant.x)
+            )+
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
+  xlab(" ")+
+  #ylim(c(0,550))+
+  ylab("Total")+
+  #labs(colour = NULL) +
+  #scale_color_manual(values=c("black", "darkred")) +
+  theme_bw()+
+  theme(legend.position = "bottom")+
+  theme(text = element_text(size = 10)) +
+  theme(legend.title = element_blank())+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  scale_color_brewer(palette = "Set1")
+
+
+# IMC mediana -------------------------------------------------------------
+
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+#grafico de colunas
+unicos |> 
+  filter(who_drug_active_ingredient_variant.x %in% 
+           c("Semaglutide", "Liraglutide", "Tirzepatide")) |> 
+  mutate(
+    IMC = weight_kg / (height_cm/100)^2,
+    ano = year(data_pad)
+  ) |> 
+  group_by(ano, who_drug_active_ingredient_variant.x) |> 
+  summarise(
+    med_IMC = median(IMC, na.rm = TRUE),
+    .groups = "drop"
+  ) |> 
+  ggplot(aes(x = factor(ano), y = med_IMC,
+             fill = who_drug_active_ingredient_variant.x)) +
+  geom_col(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "bottom")+
+  theme(text = element_text(size = 11)) +
+  xlab("Ano")+
+  ylab("Mediana do IMC")+ 
+  #theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme_bw()+
+  theme(legend.title = element_blank())
+
+
+#boxplot
+unicos |>
+  ggplot(aes(x = factor(ano), y = IMC,
+             fill = who_drug_active_ingredient_variant.x)) +
+  geom_boxplot(position = position_dodge(width = 0.8)) +
+  scale_fill_brewer(palette = "Set1") +
+  coord_cartesian(ylim = c(10, 60)) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    text = element_text(size = 11)
+  ) +
+  labs(x = "Ano", y = "IMC")
