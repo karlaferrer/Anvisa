@@ -1,6 +1,7 @@
 library (readxl)
 library (janitor)
 library(dplyr)
+library(tidyr)
 
 
 # Organização -------------------------------------------------------------
@@ -46,7 +47,75 @@ link2 <- link |>
   )
 
 # reports por medicamento
-link2 |> 
+link |> 
   group_by(who_drug_active_ingredient_variant) |> 
   summarise(n_distinct((umc_report_id)))
+
+#juntar dados demográficos
+link2 <- link2 |> 
+  left_join(cases, by ="umc_report_id", keep = F) 
+
+library(lubridate)
+#padronizar data
+link2 <- link2 |> 
+  mutate(
+    data_pad = ymd(vigi_base_initial_date),
+    month_yr = format_ISO8601(data_pad, precision = "ym")
+  )
+
+# reports por mes/ano
+link2_g <- link2 |> 
+  group_by(month_yr) |> 
+  summarise(n_distinct((umc_report_id)))
+
+#pares medicamentos de interesse e todos os eventos (denominador)
+link3 <- link |>
+  filter(who_drug_active_ingredient_variant %in%
+           c("Semaglutide",
+             "Liraglutide",
+             "Tirzepatide",
+             "Insulin degludec;Liraglutide",
+             "Dulaglutide",
+             "Lixisenatide")
+  ) 
+  
+
+#juntar dados demográficos
+link3 <- link3 |> 
+  left_join(cases, by ="umc_report_id", keep = F) 
+
+
+
+#padronizar data
+link3 <- link3 |> 
+  mutate(
+    data_pad = ymd(vigi_base_initial_date),
+    month_yr = format_ISO8601(data_pad, precision = "ym")
+  )
+
+# reports por mes/ano
+teste2 <- link3 |> 
+  group_by(month_yr) |> 
+  summarise(n_distinct((umc_report_id)))
+
+#criar campo data no cases
+cases <- cases |> 
+  mutate(
+    data_pad = ymd(vigi_base_initial_date),
+    month_yr = format_ISO8601(data_pad, precision = "ym")
+  )
+
+# reports por mes/ano
+cases_g <- cases |> 
+  group_by(month_yr) |> 
+  summarise(n_distinct((umc_report_id)))
+
+cases_g <- cases_g |>
+  rename(total = "n_distinct((umc_report_id))") |>
+  left_join(link2_g, by ="month_yr", keep = F) |>
+  rename(usos = "n_distinct((umc_report_id))") |>  
+  replace_na(list(usos = 0)) |> 
+  mutate(
+    perc = (usos/total)*100
+  )
 
