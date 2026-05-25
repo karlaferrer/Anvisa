@@ -62,56 +62,69 @@ link2 <- link2 |>
 # Agrupar reports de uso indevido por mes/ano
 link2_g <- link2 |> 
   summarise(n_distinct((umc_report_id)),
-            .by = c(who_drug_active_ingredient_variant.x, month_yr))
+            .by = c(who_drug_active_ingredient_variant.x, month_yr)) |> 
+  rename( casos = "n_distinct((umc_report_id))")
 
+#medicamentos
+drugs2 <- drugs |>
+  filter(who_drug_active_ingredient_variant %in%
+           c("Semaglutide",
+             "Liraglutide",
+             "Tirzepatide",
+             "Insulin degludec;Liraglutide",
+             "Insulin glargine;Lixisenatide",
+             "Dulaglutide",
+             "Lixisenatide")
+  )
+  
+drugs2 <- drugs2 |>
+  left_join(cases, by = "umc_report_id", keep = F ) 
 
-#criar campo data no cases
-cases <- cases |> 
+#criar campo data
+drugs2 <- drugs2 |> 
   mutate(
     data_pad = ymd(national_pv_centre_initial_receive_date),
     month_yr = format_ISO8601(data_pad, precision = "ym")
   )
-
-cases_g <- cases |>
-  filter(month_yr > "2021-03") |> 
-  left_join(link2, by = "umc_report_id", keep = F ) 
-
-cases_g <- cases_g |> 
-  group_by(who_drug_active_ingredient_variant.y, month_yr.y) |>
+    
+#agrupar por mes e ano e ingrediente
+drugs_g <- drugs2 |> 
+  group_by(who_drug_active_ingredient_variant.x, month_yr) |>
   summarise(n_distinct(umc_report_id)) |> 
   rename( total = "n_distinct(umc_report_id)")
   
 #juntar para formar o percentual
-link2_g <- link2_g |> 
-  left_join(cases_g, by =c("who_drug_active_ingredient_variant.x" = "who_drug_active_ingredient_variant.y",
-                           "month_yr" = "month_yr.y"), keep = F) |>
-  rename(usos = "n_distinct((umc_report_id))") |>  
-  replace_na(list(usos = 0)) |>
-  replace_na(list(total = 0)) |>
+drugs_g <- drugs_g |> 
+  left_join(link2_g, by =c("who_drug_active_ingredient_variant.x",
+                           "month_yr"), keep = F) |>
+  replace_na(list(casos = 0)) |>
   mutate(
-    perc = (usos / total) * 100
+    perc = (casos / total) * 100
   )
 
 #Serie historica do perc de uso indevido com mediana
 library (ggplot2)
 library(RColorBrewer)
-plot_serie <- link2_g |>
-  #filter( month_yr > "2018-01") |>
+plot_serie <- drugs_g |>
+  filter( month_yr > "2018-01") |>
+  filter(who_drug_active_ingredient_variant.x %in%
+           c("Semaglutide",
+             "Tirzepatide")) |> 
   ggplot() +
   #geom_line(size = 0.3)+
   geom_vline(xintercept = as.Date("2025-07-01"),
-             linetype="dotted", color = "black", alpha = 0.5)+
-  geom_hline(aes(yintercept = median(perc)), color = "darkgreen", alpha = 0.5, linetype="dotted")+
-  geom_line(aes(x= ym(month_yr),y=perc,group = who_drug_active_ingredient_variant.x,
+             linetype="dotted", color = "black")+
+  geom_hline(aes(yintercept = median(casos)), color = "darkgreen", linetype="dotted")+
+  geom_line(aes(x= ym(month_yr),y=casos,group = who_drug_active_ingredient_variant.x,
                 color = who_drug_active_ingredient_variant.x),linewidth = 0.4)+
-  geom_point(aes(x= ym(month_yr),y=perc, group = who_drug_active_ingredient_variant.x,
+  geom_point(aes(x= ym(month_yr),y=casos, group = who_drug_active_ingredient_variant.x,
                  color = who_drug_active_ingredient_variant.x), size = 0.8)+
   scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
   xlab("ano")+
-  ylim(c(0,40))+
-  ylab("Usos fora da indicação (%)")+
+  ylim(c(0,30))+
+  ylab("Usos fora da indicação")+
   xlab(" ") + 
-  labs(title = "Percentual de notificações com usos fora da indicação")+
+  labs(title = "Notificações com usos fora da indicação")+
   #labs(colour = NULL) +
   #scale_color_manual(values=c("black", "darkred")) +
   theme_bw()+
@@ -130,7 +143,7 @@ plot_serie <- link2_g |>
     )
   )
 
-ggsave("GLP/plot_serie.png", 
+ggsave("GLP/plot_serie_casos.png", 
        plot_serie,
        width = 15,
        height = 10,
@@ -139,10 +152,6 @@ ggsave("GLP/plot_serie.png",
 
 #tabela com IMC
 #registros unicos
-library(dplyr)
-
-library(dplyr)
-
 of_un <- link2 |>
   distinct(umc_report_id,
            .keep_all = TRUE)
@@ -209,62 +218,62 @@ link_panc <- link_panc|>
   mutate(
     data_pad = ymd(national_pv_centre_initial_receive_date),
     month_yr = format_ISO8601(data_pad, precision = "ym")
-      )
+  )
 
-#registros unicos
-panc_un <- link_panc |>
-  distinct(umc_report_id,
-           who_drug_active_ingredient_variant.y,
-           med_dra_preferred_term.y,
-           .keep_all = TRUE)
+# Agrupar reports de pancreatite por mes/ano
+panc_g <- link_panc |> 
+  summarise(n_distinct((umc_report_id)),
+            .by = c(who_drug_active_ingredient_variant.x, month_yr)) |> 
+  rename( casos_p = "n_distinct((umc_report_id))")
 
-
-# reports por mes/ano
-panc_g <- panc_un |> 
-  group_by(month_yr, who_drug_active_ingredient_variant.x) |> 
-  summarise(n_distinct(umc_report_id))
-
-colnames(panc_g)[3] <-"casos" 
+#juntar para formar o percentual - panc
+drugs_g <- drugs_g |> 
+  left_join(panc_g, by =c("who_drug_active_ingredient_variant.x",
+                           "month_yr"), keep = F) |>
+  replace_na(list(casos_p = 0)) |>
+  mutate(
+    perc_p = (casos_p / total) * 100
+  )
 
 #Serie historica dos casos de pancreatite com mediana
 library (ggplot2)
 library(RColorBrewer)
-plot_panc <- panc_g |>
-  filter( month_yr > "2019-12") |>  
+plot_panc <- drugs_g |>
+  filter( month_yr > "2018-01") |>
+  filter(who_drug_active_ingredient_variant.x %in%
+          c("Semaglutide",
+           "Tirzepatide")) |> 
   ggplot() +
-  #geom_line(size = 0.3)+
   geom_vline(xintercept = as.Date("2025-07-01"),
-             linetype="dashed", color = "black", alpha = 0.5)+
-  geom_line(aes(x= ym(month_yr),y=casos,group = who_drug_active_ingredient_variant.x,
+             linetype="dotted", color = "black")+
+  geom_hline(aes(yintercept = median(perc_p)), color = "darkgreen", linetype="dotted")+
+  geom_line(aes(x= ym(month_yr),y=perc_p,group = who_drug_active_ingredient_variant.x,
                 color = who_drug_active_ingredient_variant.x),linewidth = 0.4)+
-  geom_point(aes(x= ym(month_yr),y=casos,group = who_drug_active_ingredient_variant.x,
-                 color = who_drug_active_ingredient_variant.x), size = 0.5)+
-  geom_hline(aes(yintercept = median(casos)), color = "darkgreen", alpha = 0.5,linetype="dashed")+
+  geom_point(aes(x= ym(month_yr),y=perc_p, group = who_drug_active_ingredient_variant.x,
+                 color = who_drug_active_ingredient_variant.x), size = 0.8)+
   scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
   xlab("ano")+
-  ylim(c(0,8))+
-  ylab("n. casos")+
+  ylim(c(0,100))+
+  ylab("Casos de pancreatite (%)")+
   xlab(" ") + 
-  #labs(colour = NULL) +
-  #scale_color_manual(values=c("black", "darkred")) +
+  labs(title = "Percentual das notificações com casos de pancreatite")+
   theme_bw()+
   theme(legend.position = "bottom")+
   theme(text = element_text(size = 8)) +
   theme(legend.title = element_blank())+
-  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme(axis.text.x=element_text(angle = 60,hjust=1))+
   scale_color_manual(
     values = c(
-        "Liraglutide" = "#0072B2",  # azul
-        "Semaglutide" = "#D55E00", # laranja
-        "Tirzepatide" = "#009E73", # verde
-        "Dulaglutide" = "#CC79A7", # roxo/rosa
-        "Insulin glargine;Lixisenatide" = "#E69F00",   # amarelo-ouro
-        "Insulin degludec;Liraglutide" = "#56B4E9" # azul claro
-      )
+      "Liraglutide" = "#0072B2",  # azul
+      "Semaglutide" = "#D55E00", # laranja
+      "Tirzepatide" = "#009E73", # verde
+      "Dulaglutide" = "#CC79A7", # roxo/rosa
+      "Insulin glargine;Lixisenatide" = "#E69F00",   # amarelo-ouro
+      "Insulin degludec;Liraglutide" = "#56B4E9" # azul claro
     )
+  )
 
-
-ggsave("GLP/plot_panc.png", 
+ggsave("GLP/plot_panc_perc.png", 
        plot_panc,
        width = 15,
        height = 10,
@@ -272,8 +281,13 @@ ggsave("GLP/plot_panc.png",
        dpi = 300)
 
 #tabela descritiva
+#registros unicos
+panc_un <- link_panc |>
+  distinct(umc_report_id,
+           who_drug_active_ingredient_variant.x,
+           med_dra_preferred_term.x,
+           .keep_all = TRUE)
 
-          
 
 # idade, sexo, IMC por medicamento
 t1 <- panc_un  |> 
@@ -306,3 +320,435 @@ names(t2)[1] <- "who_drug_active_ingredient_variant.x"
 
 t1 <- rbind(t1,t2)
 rm(t2)
+
+# Exploratoria ------------------------------------------------------------
+library(dplyr)
+library(tsibble)
+library(fabletools)
+library(feasts)
+
+sema_ts <- sema |> 
+  mutate(
+    date = yearmonth(vetor_mes_ano, format = "%Y-%m")
+  ) |>
+  as_tsibble(index = date)
+
+#decomposicao
+sema_ts |> 
+  model(STL(casos ~ season(window = "periodic"))) %>%
+  components() |> 
+  autoplot()
+
+ts_y <- ts(sema$casos,
+           start = c(2019, 9),
+           frequency = 12)
+
+#serie bruta
+plot(ts_y)
+
+#meses
+monthplot(ts_y)
+
+#acf
+sema_ts |>ACF(casos) |> 
+  autoplot()
+
+acf(ts_y)
+#serie de memoria longa
+#correlacao temporal forte
+#sazonalidade nao é clara
+
+acf(diff(ts_y))
+
+
+# Modelos -----------------------------------------------------------------
+
+#modelos para serie temporais inflados de zeros
+#glmmtmb
+
+#preparacao do dataset
+sema <- drugs_g |> 
+  filter(who_drug_active_ingredient_variant.x %in% "Semaglutide")
+
+#vetor de meses e ano completo
+datas <- seq(
+  from = as.Date("2019-09-01"),
+  to   = as.Date("2026-05-18"),
+  by   = "month"
+)
+
+vetor_mes_ano <- format_ISO8601(datas, precision = "ym")
+
+vetor_mes_ano <- as.data.frame(vetor_mes_ano)
+
+library (stringr)
+sema <- vetor_mes_ano |> 
+  left_join(sema, by = c("vetor_mes_ano"= "month_yr")) |> 
+  replace_na(list(total = 0,casos = 0, perc = 0,casos_p = 0, perc_p = 0)) |> 
+  replace_na(list(who_drug_active_ingredient_variant.x = "Semaglutide")) |> 
+  mutate(mes = str_sub(vetor_mes_ano, -2, -1),
+         ano = str_sub(vetor_mes_ano, 1, 4)
+         )
+  
+#adicionar time para tendencia
+sema <- sema |> 
+  mutate(time = 1: nrow(sema))
+
+sema$mes <- as.numeric(sema$mes)
+sema$ano <- as.numeric(sema$ano)
+
+#incluir covariaveis step e ramp
+sema <- sema |> 
+  mutate(
+    step = case_when(
+      ano >= 2026 ~ 1,
+      ano == 2025 & mes >= 6 ~ 1,
+      TRUE ~ 0
+    ),
+    ramp = case_when(
+      ano < 2025 ~ 0,
+      ano == 2025 & mes < 6 ~ 0,
+      TRUE ~ (ano - 2025) * 12 + (mes - 6) + 1)
+    )
+
+#retirar mes de maio incompleto
+library(dplyr)
+library(lubridate)
+sema$date <- ym(sema$vetor_mes_ano)
+sema <- sema |> 
+  filter (date < "2026-05-01")
+
+# modelo com harmonicos e tendencia suave
+m2 <- glmmTMB(
+  casos ~
+    time + #tendencia sem spline
+    step +
+    ramp +
+    sin(2*pi*time/12) + #sazonalidade suave com harmonicos
+    cos(2*pi*time/12),
+  
+  family = nbinom2(),
+  data = sema
+)
+
+#checar autocorrelacao residual
+acf(residuals(m2))
+
+library(DHARMa)
+res <- simulateResiduals(m2)
+testTemporalAutocorrelation(
+  res,
+  time = sema$time
+)
+
+#checar residuos
+plot(res)
+testZeroInflation(res)
+testDispersion(res)
+
+# modelo com efeito simples de cada mes e tendencia suave
+m3 <- glmmTMB(
+  casos ~
+    time + #tendencia sem spline
+    step +
+    ramp +
+    factor(mes),
+  
+  family = nbinom2(),
+  data = sema
+)
+
+#checar autocorrelacao residual
+acf(residuals(m3))
+
+library(DHARMa)
+res3 <- simulateResiduals(m3)
+testTemporalAutocorrelation(
+  res3,
+  time = sema$time
+)
+
+#checar residuos
+plot(res3)
+testZeroInflation(res3)
+testDispersion(res3)
+
+library(splines)
+
+#modelo com harmonicos para sazonalidade - suave
+#e com spline para tendencia - ajuste de tendencia nao linear
+library(splines)
+m4 <- glmmTMB(
+  casos ~
+    ns(time, df = 4) +
+    step +
+    ramp +
+    sin(2*pi*time/12) +
+    cos(2*pi*time/12),
+  
+  family = nbinom2(),
+  data = sema
+)
+
+summary(m4)
+
+#diagnostico m4
+library(DHARMa)
+res4 <- simulateResiduals(m4)
+testTemporalAutocorrelation(
+  res4,
+  time = sema$time
+)
+
+#checar residuos
+plot(res4)
+testZeroInflation(res4)
+testDispersion(res4)
+
+#modelo conceitual
+#log(μt)=f(time)+βstep​stept​+βramp​rampt​+sazonalidade
+
+#Após a intervenção
+
+#O nível inicial:
+#praticamente não muda muito (step não significativo).
+#Mas a inclinação:
+#passa a cair progressivamente (ramp negativo).
+
+#a intervenção não produziu uma alteração abrupta imediata nas contagens, 
+#mas esteve associada a uma redução gradual e progressiva da série ao longo do 
+#tempo após sua implementacao
+
+#IMPORTANTE
+#efeito adicional pós-intervenção ajustado pela tendência basal e sazonalidade.
+#O termo de mudança de inclinação pós-intervenção (ramp) foi estatisticamente 
+#significativo (β = -0.234; p = 0.004), indicando redução gradual na tendência 
+#temporal após a intervenção. A exponencial do coeficiente sugere diminuição 
+#média de aproximadamente 21% por unidade temporal no número esperado de casos, 
+#ajustado para tendência temporal basal, sazonalidade e sobredispersão.
+
+#efeito cumulativo
+
+#modelo com harmonicos para sazonalidade - suave
+#e com spline para tendencia - ajuste de tendencia nao linear mais suave
+library(splines)
+m5 <- glmmTMB(
+  casos ~
+    ns(time, df = 3) +
+    step +
+    ramp +
+    sin(2*pi*time/12) +
+    cos(2*pi*time/12),
+  
+  family = nbinom2(),
+  data = sema
+)
+
+summary(m5)
+
+#diagnostico m5
+library(DHARMa)
+res5 <- simulateResiduals(m5)
+testTemporalAutocorrelation(
+  res5,
+  time = sema$time
+)
+
+#checar residuos
+plot(res5)
+testZeroInflation(res5)
+testDispersion(res5)
+
+#tendencia piecewise
+#usa tendencia basal da serie 
+#ate a intervencao
+#durante a intervencao tendencia fica estavel 
+sema <- sema |> 
+  mutate(
+    pre_time = case_when(time < 70 ~ time,
+                         TRUE ~ 70)
+  )
+
+m6 <- glmmTMB(
+  casos ~
+    pre_time +
+    step +
+    ramp +
+    sin(2*pi*time/12) +
+    cos(2*pi*time/12),
+  
+  family = nbinom2(),
+  data = sema
+)
+
+#diagnostico m6
+library(DHARMa)
+res6 <- simulateResiduals(m6)
+testTemporalAutocorrelation(
+  res6,
+  time = sema$time
+)
+
+#checar residuos
+plot(res6)
+testZeroInflation(res6)
+testDispersion(res6)
+
+
+# Valores preditos --------------------------------------------------------
+
+pred <- predict(
+  m2,
+  type = "link",
+  se.fit = TRUE
+)
+
+sema$pred <- exp(pred$fit)
+
+sema$lwr <- exp(pred$fit - 1.96 * pred$se.fit)
+
+sema$upr <- exp(pred$fit + 1.96 * pred$se.fit)
+
+library(ggplot2)
+ggplot(sema, aes(x = time)) +
+  
+  geom_ribbon(aes(ymin = lwr,
+                  ymax = upr),
+              alpha = 0.2) +
+  
+  geom_line(aes(y = pred),
+            linewidth = 1, color ="red") +
+  
+  geom_point(aes(y = casos),
+             alpha = 0.7) 
+  
+  #geom_line(aes(y = casos),
+   #         alpha = 0.5)
+
+#IC para as covariaveis step e ramp
+exp(confint(m1, parm = c("step", "ramp")))
+
+
+#efeito acumulado da intervenção
+
+
+# Contrafato --------------------------------------------------------------
+#criar o contrafato
+contra <- sema
+contra$step <- 0
+contra$ramp <- 0
+
+#predicao do contrafato
+pred_cf <- predict(
+  m6,
+  newdata = contra,
+  type = "link",
+  se.fit = TRUE
+)
+
+contra$pred_cf <- exp(pred_cf$fit)
+contra$lwr_cf <- exp(pred_cf$fit - 1.96 * pred_cf$se.fit)
+contra$upr_cf <- exp(pred_cf$fit + 1.96 * pred_cf$se.fit)
+
+data_interv <- ym("2025-06")
+
+contra_pos <- contra |>
+  dplyr::filter(date >= data_interv)
+
+# no grafico
+plot_m6 <- ggplot(sema, aes(x = date)) +
+  
+  geom_ribbon(aes(ymin = lwr,
+                  ymax = upr),
+              fill = "red",
+              alpha = 0.2) +
+  
+  geom_line(aes(y = pred),
+            color = "red",
+            linewidth = 0.8) +
+  
+  geom_ribbon(data = contra_pos,
+              aes(ymin = lwr_cf,
+                  ymax = upr_cf),
+              fill = "blue",
+              alpha = 0.15) +
+  
+    geom_line(data = contra_pos,
+            aes(y = pred_cf),
+            color = "blue",
+            linewidth = 0.8,
+            linetype = "dotted") +
+  
+  geom_line(aes(y = casos),
+            color = "black",
+            alpha = 0.7) +
+  
+  geom_point(aes(y = casos),
+             color = "black",
+             size = 1) +
+  
+  geom_vline(xintercept = data_interv,
+             linetype = "dashed") +
+  ylab("Usos fora da indicação")+
+  xlab(" ") + 
+  labs(title = "Notificações com usos fora da indicação")+
+  
+  theme_bw()
+
+ggsave("GLP/plot_m6.png", 
+       plot_m6,
+       width = 15,
+       height = 10,
+       unit = "cm",
+       dpi = 300)
+
+#IC para o modelo m2
+exp(confint(m2, parm = c("step", "ramp")))
+
+#total de notificações para semaglutida
+
+#Serie historica do perc de uso indevido com mediana
+library (ggplot2)
+plot_serie <- drugs_g |>
+  filter( month_yr > "2018-01" & month_yr < "2026-05" ) |>
+  filter(who_drug_active_ingredient_variant.x %in%
+           c("Semaglutide")) |> 
+  ggplot() +
+  #geom_line(size = 0.3)+
+  geom_vline(xintercept = as.Date("2025-07-01"),
+             linetype="dotted", color = "black")+
+  geom_hline(aes(yintercept = median(total)), color = "darkgreen", linetype="dotted")+
+  geom_line(aes(x= ym(month_yr),y=total, group = who_drug_active_ingredient_variant.x,
+                color = who_drug_active_ingredient_variant.x),linewidth = 0.4)+
+  geom_point(aes(x= ym(month_yr),y=total, group = who_drug_active_ingredient_variant.x,
+                 color = who_drug_active_ingredient_variant.x), size = 0.8)+
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
+  xlab("ano")+
+  ylim(c(0,100))+
+  ylab("N. notificações")+
+  xlab(" ") + 
+  labs(title = "Total de Notificações - Semaglutida")+
+  #labs(colour = NULL) +
+  #scale_color_manual(values=c("black", "darkred")) +
+  theme_bw()+
+  theme(legend.position = "bottom")+
+  theme(text = element_text(size = 8)) +
+  theme(legend.title = element_blank())+
+  theme(axis.text.x=element_text(angle = 60,hjust=1))+
+  scale_color_manual(
+    values = c(
+      "Liraglutide" = "#0072B2",  # azul
+      "Semaglutide" = "#D55E00", # laranja
+      "Tirzepatide" = "#009E73", # verde
+      "Dulaglutide" = "#CC79A7", # roxo/rosa
+      "Insulin glargine;Lixisenatide" = "#E69F00",   # amarelo-ouro
+      "Insulin degludec;Liraglutide" = "#56B4E9" # azul claro
+    )
+  )
+
+ggsave("GLP/plot_sema.png", 
+       plot_serie,
+       width = 15,
+       height = 10,
+       unit = "cm",
+       dpi = 300)
