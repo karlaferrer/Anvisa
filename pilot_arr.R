@@ -390,6 +390,15 @@ sema <- vetor_mes_ano |>
          ano = str_sub(vetor_mes_ano, 1, 4)
          )
   
+#retirar mes de maio incompleto e comecar em jan/21
+library(dplyr)
+library(lubridate)
+sema$date <- ym(sema$vetor_mes_ano)
+sema <- sema |> 
+  filter (date < "2026-05-01") |> 
+  filter (date > "2020-12-01")
+
+
 #adicionar time para tendencia
 sema <- sema |> 
   mutate(time = 1: nrow(sema))
@@ -411,13 +420,8 @@ sema <- sema |>
       TRUE ~ (ano - 2025) * 12 + (mes - 6) + 1)
     )
 
-#retirar mes de maio incompleto
-library(dplyr)
-library(lubridate)
-sema$date <- ym(sema$vetor_mes_ano)
-sema <- sema |> 
-  filter (date < "2026-05-01")
 
+library(glmmTMB)
 # modelo com harmonicos e tendencia suave
 m2 <- glmmTMB(
   casos ~
@@ -480,7 +484,7 @@ library(splines)
 library(splines)
 m4 <- glmmTMB(
   casos ~
-    ns(time, df = 4) +
+    ns(time, df = 3) +
     step +
     ramp +
     sin(2*pi*time/12) +
@@ -504,6 +508,9 @@ testTemporalAutocorrelation(
 plot(res4)
 testZeroInflation(res4)
 testDispersion(res4)
+
+#IC para as covariaveis step e ramp
+exp(confint(m4, parm = c("step", "ramp")))
 
 #modelo conceitual
 #log(μt)=f(time)+βstep​stept​+βramp​rampt​+sazonalidade
@@ -626,11 +633,9 @@ ggplot(sema, aes(x = time)) +
    #         alpha = 0.5)
 
 #IC para as covariaveis step e ramp
-exp(confint(m1, parm = c("step", "ramp")))
-
+exp(confint(m2, parm = c("step", "ramp")))
 
 #efeito acumulado da intervenção
-
 
 # Contrafato --------------------------------------------------------------
 #criar o contrafato
@@ -640,7 +645,7 @@ contra$ramp <- 0
 
 #predicao do contrafato
 pred_cf <- predict(
-  m6,
+  m2,
   newdata = contra,
   type = "link",
   se.fit = TRUE
@@ -656,7 +661,7 @@ contra_pos <- contra |>
   dplyr::filter(date >= data_interv)
 
 # no grafico
-plot_m6 <- ggplot(sema, aes(x = date)) +
+plot_m2 <- ggplot(sema, aes(x = date)) +
   
   geom_ribbon(aes(ymin = lwr,
                   ymax = upr),
@@ -676,12 +681,11 @@ plot_m6 <- ggplot(sema, aes(x = date)) +
     geom_line(data = contra_pos,
             aes(y = pred_cf),
             color = "blue",
-            linewidth = 0.8,
-            linetype = "dotted") +
+            linewidth = 0.8) +
   
-  geom_line(aes(y = casos),
-            color = "black",
-            alpha = 0.7) +
+ # geom_line(aes(y = casos),
+  #          color = "black",
+   #         alpha = 0.7) +
   
   geom_point(aes(y = casos),
              color = "black",
@@ -695,8 +699,8 @@ plot_m6 <- ggplot(sema, aes(x = date)) +
   
   theme_bw()
 
-ggsave("GLP/plot_m6.png", 
-       plot_m6,
+ggsave("GLP/plot_m2.png", 
+       plot_m2,
        width = 15,
        height = 10,
        unit = "cm",
@@ -752,3 +756,348 @@ ggsave("GLP/plot_sema.png",
        height = 10,
        unit = "cm",
        dpi = 300)
+
+
+# INLA  -------------------------------------------------------------------
+library(INLA)
+#contrafato - sem vacinacao
+contrafato = sema |>  
+  filter(step == 1) |> 
+  mutate(
+    step = 0,
+    ramp = 0,
+    casos = NA
+  )
+
+eq = casos ~ 1 + step + ramp +
+#Sazonalidade mensal
+f(mes, model = "rw2", cyclic = T) + 
+#potencial tendencia temporal (linear)
+time
+
+#dataset
+sema.inla <- sema |> 
+  bind_rows(contrafato) 
+  
+
+m_i = inla(formula = eq, family = "nbinomial", 
+            #offset = log(total/10^5), 
+            control.compute = control.compute(waic = T, dic = T), 
+            control.predictor=list(compute = TRUE, link = 1),
+            data = sema.inla)
+
+# Plot
+
+  idx = which(is.na(sema.inla$casos))
+  
+  predicao<- bind_cols(exp(m_final$summary.linear.predictor[idx,]), time = sema.inla[idx,]$time,
+                       ofs = exp(m_final$offset.linear.predictor)[idx], ano = sema.inla[idx,]$ano,
+                       mes = sema.inla[idx,]$mes) |>
+    mutate (data = paste (ano, mes, sep = "-")) |>
+    mutate(data = ym(data))
+  
+  predicao2<- bind_cols(exp(m_final$summary.linear.predictor[-idx,]), time = sema.inla[-idx,]$time,
+                        ofs = exp(m_final$offset.linear.predictor)[-idx], ano = sema.inla[-idx,]$ano,
+                        mes = sema.inla[-idx,]$mes) |>
+    mutate (data = paste (ano, mes, sep = "-")) |>
+    mutate(data = ym(data))
+  
+  contra_plot <- ggplot() +
+    geom_ribbon(data = predicao2,
+                aes(x = as.Date(data),
+                    y = (`0.5quant`)/ofs,
+                    color ="Ajustado",
+                    ymin = (`0.025quant`)/ofs,
+                    ymax = (`0.975quant`)/ofs),
+                alpha = 0.5, fill = "lightblue3", linetype = 0)+
+    geom_line(data = predicao2,
+              mapping = aes(x = as.Date(data), y = (`0.5quant`)/ofs, color ="Ajustado")
+    ) +
+    geom_ribbon(data = predicao,
+                mapping = aes(x = as.Date(data),
+                              y = (`0.5quant`)/ofs,
+                              color ="Contrafato",
+                              ymin = (`0.025quant`)/ofs,
+                              ymax = (`0.975quant`)/ofs),
+                alpha = 0.5, fill = "aquamarine3", linetype = 0) +
+    geom_line(data = predicao,
+              mapping = aes(x = as.Date(data), y = (`0.5quant`)/ofs, color ="Contrafato")
+    ) +
+    geom_point(data = sema.inla[-idx,],
+               mapping = aes(x = as.Date(date), y = casos, color = "Observado"), size = 1
+    ) +
+    geom_vline(xintercept = as.Date("2025-06-01"),
+              linetype="dashed", color = "black") +
+    labs(y = "Usos fora da indicação", x = " ") +
+    scale_color_manual(values=c("turquoise4", "darkblue", "black")) +
+    labs(colour = NULL) +
+    theme_bw()+
+    theme(legend.position = "bottom")+
+    #ggtitle(ea[x])+
+    theme(plot.title = element_text(size = 13))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    theme(text = element_text(size = 13))
+
+  ggsave("glp/inla_plot.png", contra_plot,
+         width = 17, 
+         height = 14, 
+         unit = "cm", 
+         dpi = 300)
+
+
+# Inla com ar1 para trend -------------------------------------------------
+
+  hyper = list(
+    prec = list(
+      prior = "pc.prec",
+      param = c(1, 0.01)
+    )
+  )
+  m_final <- inla(
+    casos ~
+      step +
+      ramp +
+      sin(2*pi*time/12) +
+      cos(2*pi*time/12) +
+      f(time, model = "ar1"), #ou rw1
+    
+    family = "nbinomial",
+    control.compute = control.compute(waic = T, dic = T), 
+    control.predictor=list(compute = TRUE, link = 1),
+    data = sema.inla
+  )
+  
+  #Modelo linear generalizado (GLM) para contagens com distribuição binomial negativa, aplicado em uma série temporal interrompida 
+  #(Interrupted Time Series, ITS)
+  #ajustando por componentes de tendência + intervenção + sazonalidade.
+  #Regressão harmônica sazonal- sazonalidade harmônica - Fourier terms;
+  #Interrupted time series analysis using 
+  #negative binomial regression with harmonic seasonal adjustment.
+  
+
+# Modelo pancreatite ------------------------------------------------------
+
+  
+  #preparar dataset
+  
+  #preparacao do dataset
+  sema_p <- drugs_g |> 
+    filter(who_drug_active_ingredient_variant.x %in% "Semaglutide")
+  
+  #vetor de meses e ano completo
+  datas <- seq(
+    from = as.Date("2019-09-01"),
+    to   = as.Date("2026-05-18"),
+    by   = "month"
+  )
+  
+  vetor_mes_ano <- format_ISO8601(datas, precision = "ym")
+  
+  vetor_mes_ano <- as.data.frame(vetor_mes_ano)
+  
+  library (stringr)
+  sema_p <- vetor_mes_ano |> 
+    left_join(sema_p, by = c("vetor_mes_ano"= "month_yr")) |> 
+    replace_na(list(total = 0,casos = 0, perc = 0,casos_p = 0, perc_p = 0)) |> 
+    replace_na(list(who_drug_active_ingredient_variant.x = "Semaglutide")) |> 
+    mutate(mes = str_sub(vetor_mes_ano, -2, -1),
+           ano = str_sub(vetor_mes_ano, 1, 4)
+    )
+  
+  #retirar mes de maio incompleto e comecar em jan/21
+  library(dplyr)
+  library(lubridate)
+  sema_p$date <- ym(sema_p$vetor_mes_ano)
+  sema_p <- sema_p |> 
+    filter (date < "2026-05-01") |> 
+    filter (date > "2020-12-01")
+  
+  #adicionar time para tendencia
+  sema_p <- sema_p |> 
+    mutate(time = 1: nrow(sema_p))
+  
+  sema_p$mes <- as.numeric(sema_p$mes)
+  sema_p$ano <- as.numeric(sema_p$ano)
+  
+  #incluir covariaveis step e ramp
+  sema_p <- sema_p |> 
+    mutate(
+      step = case_when(
+        ano >= 2026 ~ 1,
+        ano == 2025 & mes >= 6 ~ 1,
+        TRUE ~ 0
+      ),
+      ramp = case_when(
+        ano < 2025 ~ 0,
+        ano == 2025 & mes < 6 ~ 0,
+        TRUE ~ (ano - 2025) * 12 + (mes - 6) + 1)
+    )
+  
+  #modelo pancreatite
+  library(glmmTMB)
+  # modelo com harmonicos e tendencia suave
+  m2p <- glmmTMB(
+    casos ~
+      time + #tendencia sem spline
+      step +
+      ramp +
+      sin(2*pi*time/12) + #sazonalidade suave com harmonicos
+      cos(2*pi*time/12),
+    
+    family = nbinom2(),
+    data = sema_p
+  )
+  
+  #checar autocorrelacao residual
+  acf(residuals(m2p))
+  
+  library(DHARMa)
+  res_p <- simulateResiduals(m2p)
+  testTemporalAutocorrelation(
+    res_p,
+    time = sema_p$time
+  )
+  
+  #checar residuos
+  plot(res_p)
+  testZeroInflation(res)
+  testDispersion(res)
+  
+  #IC para as covariaveis step e ramp
+  exp(confint(m2p, parm = c("step", "ramp")))
+  
+  # Contrafato pancreatite --------------------------------------------------------------
+
+  #valores preditos
+  pred_p <- predict(
+    m2p,
+    type = "link",
+    se.fit = TRUE
+  )
+  
+  sema_p$pred <- exp(pred_p$fit)
+  
+  sema_p$lwr <- exp(pred_p$fit - 1.96 * pred_p$se.fit)
+  
+  sema_p$upr <- exp(pred_p$fit + 1.96 * pred_p$se.fit)
+  
+  
+    #criar o contrafato
+  contra_p <- sema_p
+  contra_p$step <- 0
+  contra_p$ramp <- 0
+  
+  #predicao do contrafato
+  pred_cf_p <- predict(
+    m2p,
+    newdata = contra_p,
+    type = "link",
+    se.fit = TRUE
+  )
+  
+  contra_p$pred_cf_p <- exp(pred_cf_p$fit)
+  contra_p$lwr_cf_p <- exp(pred_cf_p$fit - 1.96 * pred_cf_p$se.fit)
+  contra_p$upr_cf_p <- exp(pred_cf_p$fit + 1.96 * pred_cf_p$se.fit)
+  
+  data_interv <- ym("2025-06")
+  
+  contra_pos <- contra_p |>
+    dplyr::filter(date >= data_interv)
+  
+  # no grafico
+  plot_m2p <- ggplot(sema_p, aes(x = date)) +
+    
+    geom_ribbon(aes(ymin = lwr,
+                    ymax = upr),
+                fill = "red",
+                alpha = 0.2) +
+    
+    geom_line(aes(y = pred),
+              color = "red",
+              linewidth = 0.8) +
+    
+    geom_ribbon(data = contra_pos,
+                aes(ymin = lwr_cf_p,
+                    ymax = upr_cf_p),
+                fill = "blue",
+                alpha = 0.15) +
+    
+    geom_line(data = contra_pos,
+              aes(y = pred_cf_p),
+              color = "blue",
+              linewidth = 0.8) +
+    
+    # geom_line(aes(y = casos),
+    #          color = "black",
+    #         alpha = 0.7) +
+    
+    geom_point(aes(y = casos_p),
+               color = "black",
+               size = 1) +
+    
+    geom_vline(xintercept = data_interv,
+               linetype = "dashed") +
+    ylab("Usos fora da indicação")+
+    xlab(" ") + 
+    labs(title = "Notificações com usos fora da indicação")+
+    
+    theme_bw()
+  
+  ggsave("GLP/plot_m2.png", 
+         plot_m2,
+         width = 15,
+         height = 10,
+         unit = "cm",
+         dpi = 300)
+  
+  #IC para o modelo m2
+  exp(confint(m2, parm = c("step", "ramp")))
+  
+  #total de notificações para semaglutida
+  
+  #Serie historica do perc de uso indevido com mediana
+  library (ggplot2)
+  plot_serie <- drugs_g |>
+    filter( month_yr > "2018-01" & month_yr < "2026-05" ) |>
+    filter(who_drug_active_ingredient_variant.x %in%
+             c("Semaglutide")) |> 
+    ggplot() +
+    #geom_line(size = 0.3)+
+    geom_vline(xintercept = as.Date("2025-07-01"),
+               linetype="dotted", color = "black")+
+    geom_hline(aes(yintercept = median(total)), color = "darkgreen", linetype="dotted")+
+    geom_line(aes(x= ym(month_yr),y=total, group = who_drug_active_ingredient_variant.x,
+                  color = who_drug_active_ingredient_variant.x),linewidth = 0.4)+
+    geom_point(aes(x= ym(month_yr),y=total, group = who_drug_active_ingredient_variant.x,
+                   color = who_drug_active_ingredient_variant.x), size = 0.8)+
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
+    xlab("ano")+
+    ylim(c(0,100))+
+    ylab("N. notificações")+
+    xlab(" ") + 
+    labs(title = "Total de Notificações - Semaglutida")+
+    #labs(colour = NULL) +
+    #scale_color_manual(values=c("black", "darkred")) +
+    theme_bw()+
+    theme(legend.position = "bottom")+
+    theme(text = element_text(size = 8)) +
+    theme(legend.title = element_blank())+
+    theme(axis.text.x=element_text(angle = 60,hjust=1))+
+    scale_color_manual(
+      values = c(
+        "Liraglutide" = "#0072B2",  # azul
+        "Semaglutide" = "#D55E00", # laranja
+        "Tirzepatide" = "#009E73", # verde
+        "Dulaglutide" = "#CC79A7", # roxo/rosa
+        "Insulin glargine;Lixisenatide" = "#E69F00",   # amarelo-ouro
+        "Insulin degludec;Liraglutide" = "#56B4E9" # azul claro
+      )
+    )
+  
+  ggsave("GLP/plot_sema.png", 
+         plot_serie,
+         width = 15,
+         height = 10,
+         unit = "cm",
+         dpi = 300)
+  
