@@ -874,70 +874,22 @@ m_i = inla(formula = eq, family = "nbinomial",
   #Interrupted time series analysis using 
   #negative binomial regression with harmonic seasonal adjustment.
   
+  #ttodos os efeitos têm forma previamente especificada.
+  #tendencia: linear
+  #intervenção: mudança abrupta (step);mudança linear gradual (ramp)
+  #Sazonalidade:senoidal anual.
 
 # Modelo pancreatite ------------------------------------------------------
 
   
   #preparar dataset
   
-  #preparacao do dataset
-  sema_p <- drugs_g |> 
-    filter(who_drug_active_ingredient_variant.x %in% "Semaglutide")
-  
-  #vetor de meses e ano completo
-  datas <- seq(
-    from = as.Date("2019-09-01"),
-    to   = as.Date("2026-05-18"),
-    by   = "month"
-  )
-  
-  vetor_mes_ano <- format_ISO8601(datas, precision = "ym")
-  
-  vetor_mes_ano <- as.data.frame(vetor_mes_ano)
-  
-  library (stringr)
-  sema_p <- vetor_mes_ano |> 
-    left_join(sema_p, by = c("vetor_mes_ano"= "month_yr")) |> 
-    replace_na(list(total = 0,casos = 0, perc = 0,casos_p = 0, perc_p = 0)) |> 
-    replace_na(list(who_drug_active_ingredient_variant.x = "Semaglutide")) |> 
-    mutate(mes = str_sub(vetor_mes_ano, -2, -1),
-           ano = str_sub(vetor_mes_ano, 1, 4)
-    )
-  
-  #retirar mes de maio incompleto e comecar em jan/21
-  library(dplyr)
-  library(lubridate)
-  sema_p$date <- ym(sema_p$vetor_mes_ano)
-  sema_p <- sema_p |> 
-    filter (date < "2026-05-01") |> 
-    filter (date > "2020-12-01")
-  
-  #adicionar time para tendencia
-  sema_p <- sema_p |> 
-    mutate(time = 1: nrow(sema_p))
-  
-  sema_p$mes <- as.numeric(sema_p$mes)
-  sema_p$ano <- as.numeric(sema_p$ano)
-  
-  #incluir covariaveis step e ramp
-  sema_p <- sema_p |> 
-    mutate(
-      step = case_when(
-        ano >= 2026 ~ 1,
-        ano == 2025 & mes >= 6 ~ 1,
-        TRUE ~ 0
-      ),
-      ramp = case_when(
-        ano < 2025 ~ 0,
-        ano == 2025 & mes < 6 ~ 0,
-        TRUE ~ (ano - 2025) * 12 + (mes - 6) + 1)
-    )
-  
+
   #modelo pancreatite
   library(glmmTMB)
   # modelo com harmonicos e tendencia suave
   m2p <- glmmTMB(
-    casos ~
+    casos_p ~
       time + #tendencia sem spline
       step +
       ramp +
@@ -945,7 +897,7 @@ m_i = inla(formula = eq, family = "nbinomial",
       cos(2*pi*time/12),
     
     family = nbinom2(),
-    data = sema_p
+    data = sema
   )
   
   #checar autocorrelacao residual
@@ -955,13 +907,13 @@ m_i = inla(formula = eq, family = "nbinomial",
   res_p <- simulateResiduals(m2p)
   testTemporalAutocorrelation(
     res_p,
-    time = sema_p$time
+    time = sema$time
   )
   
   #checar residuos
   plot(res_p)
-  testZeroInflation(res)
-  testDispersion(res)
+  testZeroInflation(res_p)
+  testDispersion(res_p)
   
   #IC para as covariaveis step e ramp
   exp(confint(m2p, parm = c("step", "ramp")))
@@ -969,61 +921,63 @@ m_i = inla(formula = eq, family = "nbinomial",
   # Contrafato pancreatite --------------------------------------------------------------
 
   #valores preditos
-  pred_p <- predict(
+  predp <- predict(
     m2p,
     type = "link",
     se.fit = TRUE
   )
   
-  sema_p$pred <- exp(pred_p$fit)
+  sema$predp <- exp(predp$fit)
   
-  sema_p$lwr <- exp(pred_p$fit - 1.96 * pred_p$se.fit)
+  sema$lwrp <- exp(predp$fit - 1.96 * predp$se.fit)
   
-  sema_p$upr <- exp(pred_p$fit + 1.96 * pred_p$se.fit)
+  sema$uprp <- exp(predp$fit + 1.96 * predp$se.fit)
   
   
-    #criar o contrafato
-  contra_p <- sema_p
-  contra_p$step <- 0
-  contra_p$ramp <- 0
+  #criar o contrafato
+  contra <- sema
+  contra$step <- 0
+  contra$ramp <- 0
   
   #predicao do contrafato
-  pred_cf_p <- predict(
+  pred_cfp <- predict(
     m2p,
-    newdata = contra_p,
+    newdata = contra,
     type = "link",
     se.fit = TRUE
   )
   
-  contra_p$pred_cf_p <- exp(pred_cf_p$fit)
-  contra_p$lwr_cf_p <- exp(pred_cf_p$fit - 1.96 * pred_cf_p$se.fit)
-  contra_p$upr_cf_p <- exp(pred_cf_p$fit + 1.96 * pred_cf_p$se.fit)
+  contra$pred_cfp <- exp(pred_cfp$fit)
+  contra$lwr_cfp <- exp(pred_cfp$fit - 1.96 * pred_cfp$se.fit)
+  contra$upr_cfp <- exp(pred_cfp$fit + 1.96 * pred_cfp$se.fit)
   
   data_interv <- ym("2025-06")
   
-  contra_pos <- contra_p |>
+  contra_pos <- contra |>
     dplyr::filter(date >= data_interv)
   
+  
   # no grafico
-  plot_m2p <- ggplot(sema_p, aes(x = date)) +
+  library(ggplot2)
+  plot_m2p <- ggplot(sema, aes(x = date)) +
     
-    geom_ribbon(aes(ymin = lwr,
-                    ymax = upr),
+    geom_ribbon(aes(ymin = lwrp,
+                    ymax = uprp),
                 fill = "red",
                 alpha = 0.2) +
     
-    geom_line(aes(y = pred),
+    geom_line(aes(y = predp),
               color = "red",
               linewidth = 0.8) +
     
     geom_ribbon(data = contra_pos,
-                aes(ymin = lwr_cf_p,
-                    ymax = upr_cf_p),
+                aes(ymin = lwr_cfp,
+                    ymax = upr_cfp),
                 fill = "blue",
                 alpha = 0.15) +
     
     geom_line(data = contra_pos,
-              aes(y = pred_cf_p),
+              aes(y = pred_cfp),
               color = "blue",
               linewidth = 0.8) +
     
@@ -1037,65 +991,14 @@ m_i = inla(formula = eq, family = "nbinomial",
     
     geom_vline(xintercept = data_interv,
                linetype = "dashed") +
-    ylab("Usos fora da indicação")+
+    ylab("Casos pancreatite")+
     xlab(" ") + 
-    labs(title = "Notificações com usos fora da indicação")+
+    labs(title = "Notificações com casos de pancreatite")+
     
     theme_bw()
   
-  ggsave("GLP/plot_m2.png", 
-         plot_m2,
-         width = 15,
-         height = 10,
-         unit = "cm",
-         dpi = 300)
-  
-  #IC para o modelo m2
-  exp(confint(m2, parm = c("step", "ramp")))
-  
-  #total de notificações para semaglutida
-  
-  #Serie historica do perc de uso indevido com mediana
-  library (ggplot2)
-  plot_serie <- drugs_g |>
-    filter( month_yr > "2018-01" & month_yr < "2026-05" ) |>
-    filter(who_drug_active_ingredient_variant.x %in%
-             c("Semaglutide")) |> 
-    ggplot() +
-    #geom_line(size = 0.3)+
-    geom_vline(xintercept = as.Date("2025-07-01"),
-               linetype="dotted", color = "black")+
-    geom_hline(aes(yintercept = median(total)), color = "darkgreen", linetype="dotted")+
-    geom_line(aes(x= ym(month_yr),y=total, group = who_drug_active_ingredient_variant.x,
-                  color = who_drug_active_ingredient_variant.x),linewidth = 0.4)+
-    geom_point(aes(x= ym(month_yr),y=total, group = who_drug_active_ingredient_variant.x,
-                   color = who_drug_active_ingredient_variant.x), size = 0.8)+
-    scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
-    xlab("ano")+
-    ylim(c(0,100))+
-    ylab("N. notificações")+
-    xlab(" ") + 
-    labs(title = "Total de Notificações - Semaglutida")+
-    #labs(colour = NULL) +
-    #scale_color_manual(values=c("black", "darkred")) +
-    theme_bw()+
-    theme(legend.position = "bottom")+
-    theme(text = element_text(size = 8)) +
-    theme(legend.title = element_blank())+
-    theme(axis.text.x=element_text(angle = 60,hjust=1))+
-    scale_color_manual(
-      values = c(
-        "Liraglutide" = "#0072B2",  # azul
-        "Semaglutide" = "#D55E00", # laranja
-        "Tirzepatide" = "#009E73", # verde
-        "Dulaglutide" = "#CC79A7", # roxo/rosa
-        "Insulin glargine;Lixisenatide" = "#E69F00",   # amarelo-ouro
-        "Insulin degludec;Liraglutide" = "#56B4E9" # azul claro
-      )
-    )
-  
-  ggsave("GLP/plot_sema.png", 
-         plot_serie,
+  ggsave("GLP/plot_m2p.png", 
+         plot_m2p,
          width = 15,
          height = 10,
          unit = "cm",
