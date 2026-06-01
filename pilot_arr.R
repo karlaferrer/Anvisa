@@ -6,10 +6,10 @@ library(tidyr)
 
 # Organização -------------------------------------------------------------
 
-cases <- read_excel("GLP/glp1805.xlsx", sheet = "Cases")
-drugs <- read_excel("GLP/glp1805.xlsx", sheet = "Drugs")
-reactions <-  read_excel("GLP/glp1805.xlsx", sheet = "Reactions")
-link <-  read_excel("GLP/glp1805.xlsx", sheet = "Drug - reaction link")
+cases <- read_excel("GLP/glp0106.xlsx", sheet = "Cases")
+drugs <- read_excel("GLP/glp0106.xlsx", sheet = "Drugs")
+reactions <-  read_excel("GLP/glp0106.xlsx", sheet = "Reactions")
+link <-  read_excel("GLP/glp0106.xlsx", sheet = "Drug - reaction link")
 
 #Clean column names
 cases <- clean_names(cases)
@@ -102,9 +102,84 @@ drugs_g <- drugs_g |>
     perc = (casos / total) * 100
   )
 
+#casos de pancreatite
+panc <- c("Pancreatite",
+          "Pancreatite aguda",
+          "Pancreatite necrosante")
+
+link_panc <- link |>
+  filter(who_drug_active_ingredient_variant %in%
+           c("Semaglutide",
+             "Liraglutide",
+             "Tirzepatide",
+             "Insulin degludec;Liraglutide",
+             "Insulin glargine;Lixisenatide",
+             "Dulaglutide",
+             "Lixisenatide")
+  ) |> 
+  filter(med_dra_preferred_term %in% panc)
+
+#numero de notificacoes
+length(unique(link_panc$umc_report_id))
+
+#juntar dados demográficos
+link_panc <- link_panc |> 
+  left_join(cases, by ="umc_report_id", keep = F) 
+
+#padronizar data
+link_panc <- link_panc|> 
+  mutate(
+    data_pad = ymd(national_pv_centre_initial_receive_date),
+    month_yr = format_ISO8601(data_pad, precision = "ym")
+  )
+
+# Agrupar reports de pancreatite por mes/ano
+panc_g <- link_panc |> 
+  summarise(n_distinct((umc_report_id)),
+            .by = c(who_drug_active_ingredient_variant.x, month_yr)) |> 
+  rename( casos_p = "n_distinct((umc_report_id))")
+
+#juntar para formar o percentual - panc
+drugs_g <- drugs_g |> 
+  left_join(panc_g, by =c("who_drug_active_ingredient_variant.x",
+                          "month_yr"), keep = F) |>
+  replace_na(list(casos_p = 0)) |>
+  mutate(
+    perc_p = (casos_p / total) * 100
+  )
+
+#complementar meses que faltam
+#vetor de meses e ano completo
+datas <- seq(
+  from = as.Date("2016-08-01"),
+  to   = as.Date("2026-05-31"),
+  by   = "month"
+)
+
+vetor_mes_ano <- format_ISO8601(datas, precision = "ym")
+vetor_mes_ano <- as.data.frame(vetor_mes_ano)
+
+library (stringr)
+drugs_g <- vetor_mes_ano |> 
+  left_join(drugs_g, by = c("vetor_mes_ano"= "month_yr")) |> 
+  replace_na(list(total = 0,casos = 0, perc = 0,casos_p = 0, perc_p = 0)) |> 
+  replace_na(list(who_drug_active_ingredient_variant.x = "Semaglutide")) |> 
+  mutate(mes = str_sub(vetor_mes_ano, -2, -1),
+         ano = str_sub(vetor_mes_ano, 1, 4)
+  )
+
+#criar variavel data
+drugs_g$date <- ym(drugs_g$vetor_mes_ano)
+drugs_g$month_yr = format_ISO8601(drugs_g$date, precision = "ym")
+
+# Análise exploratoria ----------------------------------------------------
+
 #Serie historica do perc de uso indevido com mediana
+metrica <- "perc"
+ylab <- "Usos fora da indicação (%)"
+tit <- "Notificações com usos fora da indicação (%)"
+
 library (ggplot2)
-library(RColorBrewer)
 plot_serie <- drugs_g |>
   filter( month_yr > "2018-01") |>
   filter(who_drug_active_ingredient_variant.x %in%
@@ -114,17 +189,17 @@ plot_serie <- drugs_g |>
   #geom_line(size = 0.3)+
   geom_vline(xintercept = as.Date("2025-07-01"),
              linetype="dotted", color = "black")+
-  geom_hline(aes(yintercept = median(casos)), color = "darkgreen", linetype="dotted")+
-  geom_line(aes(x= ym(month_yr),y=casos,group = who_drug_active_ingredient_variant.x,
+  geom_hline(aes(yintercept = median(.data[[metrica]])), color = "darkgreen", linetype="dotted")+
+  geom_line(aes(x= ym(month_yr),y=.data[[metrica]],group = who_drug_active_ingredient_variant.x,
                 color = who_drug_active_ingredient_variant.x),linewidth = 0.4)+
-  geom_point(aes(x= ym(month_yr),y=casos, group = who_drug_active_ingredient_variant.x,
+  geom_point(aes(x= ym(month_yr),y=.data[[metrica]], group = who_drug_active_ingredient_variant.x,
                  color = who_drug_active_ingredient_variant.x), size = 0.8)+
   scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
   xlab("ano")+
-  ylim(c(0,30))+
-  ylab("Usos fora da indicação")+
+  ylim(c(0,100))+
+  ylab(ylab)+
   xlab(" ") + 
-  labs(title = "Notificações com usos fora da indicação")+
+  labs(title = tit)+
   #labs(colour = NULL) +
   #scale_color_manual(values=c("black", "darkred")) +
   theme_bw()+
@@ -143,7 +218,7 @@ plot_serie <- drugs_g |>
     )
   )
 
-ggsave("GLP/plot_serie_casos.png", 
+ggsave(paste0("GLP/plot_serie_", metrica, ".png"), 
        plot_serie,
        width = 15,
        height = 10,
@@ -188,52 +263,37 @@ names(t4)[1] <- "who_drug_active_ingredient_variant.x"
 t3 <- rbind(t3,t4)
 rm(t4)
 
+
+# Modelos -----------------------------------------------------------------
+
+#variaveis para modelagem
+
+#adicionar time para tendencia
+drugs_g <- drugs_g |> 
+  mutate(time = 1: nrow(drugs_g))
+
+drugs_g$mes <- as.numeric(drugs_g$mes)
+drugs_g$ano <- as.numeric(drugs_g$ano)
+
+#incluir covariaveis step e ramp
+#a partir de 2021
+drugs_g <- drugs_g |>
+  filter(ano >= 2021) |>
+  mutate(
+    step = case_when(
+      ano >= 2026 ~ 1,
+      ano == 2025 & mes >= 6 ~ 1,
+      TRUE ~ 0
+    ),
+    ramp = case_when(
+      ano < 2025 ~ 0,
+      ano == 2025 & mes < 6 ~ 0,
+      TRUE ~ (ano - 2025) * 12 + (mes - 6) + 1)
+  )
+
+
 # Pancreatite -------------------------------------------------------------
 
-panc <- c("Pancreatite",
-          "Pancreatite aguda",
-          "Pancreatite necrosante")
-
-link_panc <- link |>
-  filter(who_drug_active_ingredient_variant %in%
-           c("Semaglutide",
-             "Liraglutide",
-             "Tirzepatide",
-             "Insulin degludec;Liraglutide",
-             "Insulin glargine;Lixisenatide",
-             "Dulaglutide",
-             "Lixisenatide")
-         ) |> 
-  filter(med_dra_preferred_term %in% panc)
-
-#numero de notificacoes
-length(unique(link_panc$umc_report_id))
-
-#juntar dados demográficos
-link_panc <- link_panc |> 
-  left_join(cases, by ="umc_report_id", keep = F) 
-
-#padronizar data
-link_panc <- link_panc|> 
-  mutate(
-    data_pad = ymd(national_pv_centre_initial_receive_date),
-    month_yr = format_ISO8601(data_pad, precision = "ym")
-  )
-
-# Agrupar reports de pancreatite por mes/ano
-panc_g <- link_panc |> 
-  summarise(n_distinct((umc_report_id)),
-            .by = c(who_drug_active_ingredient_variant.x, month_yr)) |> 
-  rename( casos_p = "n_distinct((umc_report_id))")
-
-#juntar para formar o percentual - panc
-drugs_g <- drugs_g |> 
-  left_join(panc_g, by =c("who_drug_active_ingredient_variant.x",
-                           "month_yr"), keep = F) |>
-  replace_na(list(casos_p = 0)) |>
-  mutate(
-    perc_p = (casos_p / total) * 100
-  )
 
 #Serie historica dos casos de pancreatite com mediana
 library (ggplot2)
