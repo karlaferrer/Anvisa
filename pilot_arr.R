@@ -263,7 +263,6 @@ names(t4)[1] <- "who_drug_active_ingredient_variant.x"
 t3 <- rbind(t3,t4)
 rm(t4)
 
-
 #tabela descritiva - pancreatite
 #registros unicos
 panc_un <- link_panc |>
@@ -306,7 +305,7 @@ t1 <- rbind(t1,t2)
 rm(t2)
 
 
-# Dataset par aos modelos -----------------------------------------------------------------
+# Dataset parq aos modelos -----------------------------------------------------------------
 
 #variaveis para modelagem
 
@@ -314,9 +313,7 @@ rm(t2)
 drugs_g$mes <- as.numeric(drugs_g$mes)
 drugs_g$ano <- as.numeric(drugs_g$ano)
 
-#a partir de 2021
-drugs_g <- drugs_g |>
-  filter (ano >= 2021) 
+
 
 #retirar jan/21 que tem total zerado para semaglutida
 drugs_g <- drugs_g |>
@@ -847,6 +844,21 @@ m_final = inla(formula = eq, family = "nbinomial",
   
 # INLA com AR1 ------------------------------------------------------------
 
+  library(INLA)
+  #contrafato - sem vacinacao
+  contrafato = sema |>  
+    filter(step == 1) |> 
+    mutate(
+      step = 0,
+      ramp = 0,
+      casos = NA,
+      casos_p = NA
+    )
+  
+  #dataset
+  sema.inla <- sema |> 
+    bind_rows(contrafato) 
+  
   sema.inla$time_id <- sema.inla$time
   
   eq_ar1 <- casos ~
@@ -863,7 +875,6 @@ m_final = inla(formula = eq, family = "nbinomial",
                  data = sema.inla)
   
   # Plot
-  
   idx = which(is.na(sema.inla$casos))
   
   predicao_ar1<- bind_cols(exp(m_ar1$summary.linear.predictor[idx,]), time = sema.inla[idx,]$time,
@@ -878,6 +889,7 @@ m_final = inla(formula = eq, family = "nbinomial",
     mutate (data = paste (ano, mes, sep = "-")) |>
     mutate(data = ym(data))
   
+  library(ggplot2)
   contra_plot2 <- ggplot() +
     geom_ribbon(data = predicao2_ar1,
                 aes(x = as.Date(data),
@@ -1115,9 +1127,7 @@ m_final = inla(formula = eq, family = "nbinomial",
   library(INLA)
   
   eqp = casos_p ~ 1 + step + ramp +
-    #Sazonalidade mensal
     f(mes, model = "rw2", cyclic = T) + 
-    #potencial tendencia temporal (linear)
     time
   
    m_finalp = inla(formula = eqp, family = "nbinomial", 
@@ -1168,7 +1178,7 @@ m_final = inla(formula = eq, family = "nbinomial",
     ) +
     geom_vline(xintercept = as.Date("2025-06-01"),
                linetype="dashed", color = "black") +
-    labs(y = "Usos fora da indicação", x = " ") +
+    labs(y = "Casos de pancreatite", x = " ") +
     scale_color_manual(values=c("#D55E00", "blue", "black")) +
     labs(colour = NULL) +
     theme_bw()+
