@@ -236,6 +236,8 @@ t3 <- of_un  |>
   group_by(who_drug_active_ingredient_variant.x) |> 
   summarise(
     med_age = median(age, na.rm = TRUE),
+    q1 = quantile(age,0.25,na.rm = TRUE),
+    q3 = quantile(age,0.75,na.rm = TRUE),
     n_age = sum(!is.na(age)),
     prop_fem = mean(sex == "Female", na.rm = TRUE)*100,
     med_IMC = median(weight_kg / (height_cm/100)^2 , na.rm = TRUE),
@@ -249,6 +251,8 @@ t4 <- of_un |>
   #group_by(who_drug_active_ingredient_variant_x) |> 
   summarise(
     med_age = median(age, na.rm = TRUE),
+    q1 = quantile(age,0.25,na.rm = TRUE),
+    q3 = quantile(age,0.75,na.rm = TRUE),
     n_age = sum(!is.na(age)),
     prop_fem = mean(sex == "Female", na.rm = TRUE)*100,
     med_IMC = median(weight_kg / (height_cm/100)^2 , na.rm = TRUE),
@@ -277,6 +281,8 @@ t1 <- panc_un  |>
   group_by(who_drug_active_ingredient_variant.x) |> 
   summarise(
     med_age = median(age, na.rm = TRUE),
+    q1 = quantile(age,0.25,na.rm = TRUE),
+    q3 = quantile(age,0.75,na.rm = TRUE),
     n_age = sum(!is.na(age)),
     prop_fem = mean(sex == "Female", na.rm = TRUE)*100,
     med_IMC = median(weight_kg / (height_cm/100)^2 , na.rm = TRUE),
@@ -290,6 +296,8 @@ t2 <- panc_un |>
   #group_by(who_drug_active_ingredient_variant_x) |> 
   summarise(
     med_age = median(age, na.rm = TRUE),
+    q1 = quantile(age,0.25,na.rm = TRUE),
+    q3 = quantile(age,0.75,na.rm = TRUE),
     n_age = sum(!is.na(age)),
     prop_fem = mean(sex == "Female", na.rm = TRUE)*100,
     med_IMC = median(weight_kg / (height_cm/100)^2 , na.rm = TRUE),
@@ -304,16 +312,13 @@ names(t2)[1] <- "who_drug_active_ingredient_variant.x"
 t1 <- rbind(t1,t2)
 rm(t2)
 
-
-# Dataset parq aos modelos -----------------------------------------------------------------
+# Dataset para os modelos -----------------------------------------------------------------
 
 #variaveis para modelagem
 
 #adicionar time para tendencia
 drugs_g$mes <- as.numeric(drugs_g$mes)
 drugs_g$ano <- as.numeric(drugs_g$ano)
-
-
 
 #retirar jan/21 que tem total zerado para semaglutida
 drugs_g <- drugs_g |>
@@ -334,13 +339,13 @@ drugs_g <- drugs_g |>
   mutate(
     step = case_when(
       ano >= 2026 ~ 1,
-      ano == 2025 & mes >= 6 ~ 1,
+      ano == 2025 & mes >= 7 ~ 1,
       TRUE ~ 0
     ),
     ramp = case_when(
       ano < 2025 ~ 0,
-      ano == 2025 & mes < 6 ~ 0,
-      TRUE ~ (ano - 2025) * 12 + (mes - 6) + 1)
+      ano == 2025 & mes < 7 ~ 0,
+      TRUE ~ (ano - 2025) * 12 + (mes - 7) + 1)
   )
 
 write.csv(drugs_g,"GLP/dados_glp.csv")
@@ -354,7 +359,6 @@ library(feasts)
 sema <- drugs_g |> 
   filter (who_drug_active_ingredient_variant.x %in%
             "Semaglutide")
-
 
 #como serie temporal
 sema_ts <- sema |> 
@@ -914,7 +918,7 @@ m_final = inla(formula = eq, family = "nbinomial",
     geom_point(data = sema.inla[-idx,],
                mapping = aes(x = as.Date(date), y = casos, color = "Observado"), size = 1
     ) +
-    geom_vline(xintercept = as.Date("2025-06-01"),
+    geom_vline(xintercept = as.Date("2025-07-01"),
                linetype="dashed", color = "black") +
     labs(y = "Usos fora da indicação", x = " ") +
     scale_color_manual(values=c("#D55E00", "blue", "black")) +
@@ -926,7 +930,7 @@ m_final = inla(formula = eq, family = "nbinomial",
     theme(plot.title = element_text(hjust = 0.5))+
     theme(text = element_text(size = 13))
   
-  ggsave("GLP/inla_ar1_plot2.png", contra_plot2,
+  ggsave("GLP/inla_ar1_plot7.png", contra_plot2,
          width = 17, 
          height = 14, 
          unit = "cm", 
@@ -1176,7 +1180,7 @@ m_final = inla(formula = eq, family = "nbinomial",
     geom_point(data = sema.inla[-idx,],
                mapping = aes(x = as.Date(date), y = casos_p, color = "Observado"), size = 1
     ) +
-    geom_vline(xintercept = as.Date("2025-06-01"),
+    geom_vline(xintercept = as.Date("2025-07-01"),
                linetype="dashed", color = "black") +
     labs(y = "Casos de pancreatite", x = " ") +
     scale_color_manual(values=c("#D55E00", "blue", "black")) +
@@ -1188,7 +1192,7 @@ m_final = inla(formula = eq, family = "nbinomial",
     theme(plot.title = element_text(hjust = 0.5))+
     theme(text = element_text(size = 13))
   
-  ggsave("GLP/inla_plot_p.png", contra_plot_p,
+  ggsave("GLP/inla_plot_p7.png", contra_plot_p,
          width = 17, 
          height = 14, 
          unit = "cm", 
